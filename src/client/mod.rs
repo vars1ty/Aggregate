@@ -124,12 +124,8 @@ impl AggregateClient {
 
     /// Sends a packet to the server.
     pub async fn send_to_server(&self, packet_data: Vec<u8>) -> Result<(), AggregateErrors> {
-        NetPacket::new(packet_data)
-            .serialize_and_send(
-                self.magic_header_value,
-                &self.crypt,
-                &mut *self.stream_writer.lock().await,
-            )
+        NetPacket::new(packet_data, self.magic_header_value)
+            .wrap_and_send(&self.crypt, &mut *self.stream_writer.lock().await)
             .await
     }
 

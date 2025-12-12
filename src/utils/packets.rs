@@ -11,6 +11,9 @@ use tokio::{
 pub struct NetPacket {
     /// Packet data for this `NetPacket` instance.
     packet_data: Vec<u8>,
+
+    /// Magic header value.
+    magic_header: u32,
 }
 
 /// Packet types to identify and adjust receiver logic, based on what type
@@ -64,14 +67,17 @@ pub enum NetPacketAction {
 }
 
 impl NetPacket {
-    pub fn new(packet_data: Vec<u8>) -> Self {
-        Self { packet_data }
+    /// Creates a new `NetPacket` instance out of the given packet data.
+    pub fn new(packet_data: Vec<u8>, magic_header_value: u32) -> Self {
+        Self {
+            packet_data,
+            magic_header: magic_header_value,
+        }
     }
 
-    /// Tries to serialize the current `NetPacket` and send it.
-    pub async fn serialize_and_send(
+    /// Tries to wrap the current `NetPacket` and send it.
+    pub async fn wrap_and_send(
         &self,
-        magic_header_value: u32,
         crypt: &MagicCrypt256,
         stream_writer: &mut OwnedWriteHalf,
     ) -> Result<(), AggregateErrors> {
@@ -102,7 +108,7 @@ impl NetPacket {
             // Write a magic header with a dummy value to check for,
             // ensuring we're actually reading valid data later.
             stream_writer
-                .write_u32(magic_header_value)
+                .write_u32(self.magic_header)
                 .await
                 .map_err(|error| AggregateErrors::Io("Failed writing magic header", error))?;
 
