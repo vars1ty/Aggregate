@@ -21,7 +21,6 @@ pub struct NetPacket {
 ///
 /// For example, large packets (>40KB) will always be sent in chunks.
 #[repr(u8)]
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum NetPacketType {
     /// Unfinished chunk; The client should keep on reading until `FinalChunk` is hit.
     UnfinishedChunk = 0,

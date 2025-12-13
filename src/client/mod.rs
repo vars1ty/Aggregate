@@ -15,20 +15,19 @@ use tokio::{
 use tokio_socks::tcp::Socks5Stream;
 
 /// Packet header buffers.
-#[repr(Rust, packed)]
 #[derive(Default)]
 struct HeaderBuffers {
-    // Dedicated magic header buffer for the client to always reuse.
-    magic_header_buffer: [u8; std::mem::size_of::<u32>()],
-
-    // Dedicated packet type header output buffer.
-    packet_type_header_buffer: [u8; std::mem::size_of::<u8>()],
-
     // Dedicated packet signature buffer for the client to reuse.
     packet_signature_header_buffer: [u8; std::mem::size_of::<u128>()],
 
     // Dedicated packet length header buffer for the client to always reuse.
     packet_length_header_buffer: [u8; std::mem::size_of::<u32>()],
+
+    // Dedicated magic header buffer for the client to always reuse.
+    magic_header_buffer: [u8; std::mem::size_of::<u32>()],
+
+    // Dedicated packet type header output buffer.
+    packet_type_header_buffer: [u8; std::mem::size_of::<u8>()],
 }
 
 /// Aggregate client struct, responsible for connecting
@@ -122,6 +121,26 @@ impl AggregateClient {
         })
     }
 
+    /// Gets the Mutex reference to the underlying stream reader.
+    ///
+    /// ## Safety
+    /// This is only safe if you read all data properly and make sure
+    /// you aren't having an ongoing send-or-recv call, as then it can
+    /// deadlock upon accessing the actual reader.
+    pub const unsafe fn get_stream_reader(&self) -> &Mutex<OwnedReadHalf> {
+        &self.stream_reader
+    }
+
+    /// Gets the Mutex reference to the underlying stream writer.
+    ///
+    /// ## Safety
+    /// This is only safe if you write all data properly and make sure
+    /// you aren't having an ongoing send-or-recv call, as then it can
+    /// deadlock upon accessing the actual writer.
+    pub const unsafe fn get_stream_writer(&self) -> &Mutex<OwnedWriteHalf> {
+        &self.stream_writer
+    }
+
     /// Sends a packet to the server.
     pub async fn send_to_server(&self, packet_data: Vec<u8>) -> Result<(), AggregateErrors> {
         NetPacket::new(packet_data, self.magic_header_value)
@@ -168,9 +187,8 @@ impl AggregateClient {
                             .insert(packet_signature, wrapped_packet_data);
                     }
                     NetPacketType::FinalChunk => {
-                        let stitched_packet_data = self
-                            .try_stitch_packet(wrapped_packet_data, packet_signature)
-                            .await?;
+                        let stitched_packet_data =
+                            self.try_stitch_packet(wrapped_packet_data, packet_signature)?;
                         return Ok(stitched_packet_data);
                     }
                 },
@@ -184,7 +202,7 @@ impl AggregateClient {
     ///
     /// The `wrapped_packet_data` parameter should **always** be the final chunk of the
     /// buffered packet, with type `NetPacketType::FinalChunk`.
-    async fn try_stitch_packet(
+    fn try_stitch_packet(
         &self,
         wrapped_packet_data: Vec<u8>,
         packet_signature: u128,
