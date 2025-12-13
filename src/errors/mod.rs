@@ -14,7 +14,6 @@ pub enum AggregateErrors {
     ClientUnauthorized,
 
     Io(&'static str, std::io::Error),
-    Json(&'static str, simd_json::Error),
 
     /// Only use for cases that should absolutely never
     /// happen and deserve no dedicated enum for it, as
@@ -52,7 +51,6 @@ impl Display for AggregateErrors {
             }
             Self::ClientUnauthorized => write!(f, "Client hasn't been authorized!"),
             Self::Io(msg, error) => write!(f, "{msg}, error: {error}"),
-            Self::Json(msg, error) => write!(f, "{msg}, error: {error}"),
             Self::UnknownStr(msg) => write!(f, "{msg}"),
             Self::String(msg) => write!(f, "{msg}"),
         }
