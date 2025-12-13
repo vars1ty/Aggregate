@@ -7,7 +7,7 @@
 - Asynchronous through `tokio`
 - Encryption and decryption done via `magic-crypt` seamlessly for all data
 - Zlib compression and decompression done via `flate2` seamlessly for all data
-- Automatic buffering for all packets that exceed `60kb` in total size
+- Automatic buffering for all packets that exceed `40kb` in total size
 - SOCKS5 Proxy Client connection support
 - Automatic packet length header to treat TCP as a packet-based protocol (like UDP)
 - Documented and easy-to-read codebase
