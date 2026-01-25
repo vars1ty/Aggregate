@@ -220,4 +220,11 @@ impl AggregateClient {
         merged_chunks.extend_from_slice(&wrapped_packet_data);
         NetPacket::try_unwrap_packet_data(&self.crypt, merged_chunks)
     }
+
+    /// Disconnets the current client from the server.
+    pub async fn disconnect(&self) {
+        self.packet_chunks.clear();
+        drop(self.stream_reader.lock());
+        drop(self.stream_writer.lock());
+    }
 }
