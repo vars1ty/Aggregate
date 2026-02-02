@@ -162,7 +162,10 @@ impl AggregateServer {
 
         let net_packet_action = NetPacket::try_read_from_stream(
             self.magic_header_value,
-            &mut *ag_client.stream_reader.lock().await,
+            &mut *ag_client
+                .stream_reader
+                .try_lock()
+                .map_err(|_| AggregateErrors::StreamReaderLocked)?,
             &mut magic_header_buffer,
             &mut packet_type_header,
             &mut packet_signature_header_buffer,
