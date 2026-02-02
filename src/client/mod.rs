@@ -144,7 +144,13 @@ impl AggregateClient {
     /// Sends a packet to the server.
     pub async fn send_to_server(&self, packet_data: Vec<u8>) -> Result<(), AggregateErrors> {
         NetPacket::new(packet_data, self.magic_header_value)
-            .wrap_and_send(&self.crypt, &mut *self.stream_writer.lock().await)
+            .wrap_and_send(
+                &self.crypt,
+                &mut *self
+                    .stream_writer
+                    .try_lock()
+                    .map_err(|_| AggregateErrors::StreamWriterLocked)?,
+            )
             .await
     }
 
@@ -152,8 +158,16 @@ impl AggregateClient {
     /// the unwrapped bytes of it for you to process, like
     /// deserializing and such.
     pub async fn recv_packet(&self) -> Result<Vec<u8>, AggregateErrors> {
-        let stream_reader = &mut *self.stream_reader.lock().await;
-        let header_buffers = &mut *self.header_buffers.lock().await;
+        let stream_reader = &mut *self
+            .stream_reader
+            .try_lock()
+            .map_err(|_| AggregateErrors::StreamReaderLocked)?;
+
+        let header_buffers = &mut *self
+            .header_buffers
+            .try_lock()
+            .map_err(|_| AggregateErrors::StreamWriterLocked)?;
+
         loop {
             match NetPacket::try_read_from_stream(
                 self.magic_header_value,
