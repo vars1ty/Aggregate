@@ -139,9 +139,10 @@ impl AggregateServer {
     /// Returns `Ok(None)` if the packet is being buffered.
     ///
     /// Returns `Err(AggregateErrors)` if something went wrong.
-    pub async fn try_recv_packet(
+    async fn recv_packet_internal(
         &self,
         ag_client: &AGClientData,
+        stream_reader: &mut OwnedReadHalf,
     ) -> Result<Option<Vec<u8>>, AggregateErrors> {
         // Dedicated magic header buffer for the client to always reuse.
         let mut magic_header_buffer = [0u8; std::mem::size_of::<u32>()];
@@ -162,10 +163,7 @@ impl AggregateServer {
 
         let net_packet_action = NetPacket::try_read_from_stream(
             self.magic_header_value,
-            &mut *ag_client
-                .stream_reader
-                .try_lock()
-                .map_err(|_| AggregateErrors::StreamReaderLocked)?,
+            stream_reader,
             &mut magic_header_buffer,
             &mut packet_type_header,
             &mut packet_signature_header_buffer,
@@ -204,6 +202,44 @@ impl AggregateServer {
         }
     }
 
+    /// Tries to receive a packet from the given client, returning `Ok(Some(Vec<u8>))` if
+    /// the packet is complete and ready.
+    ///
+    /// This **will** lock the calling task until the stream reader is unlocked.
+    ///
+    /// Returns `Ok(None)` if the packet is being buffered.
+    ///
+    /// Returns `Err(AggregateErrors)` if something went wrong.
+    pub async fn recv_packet(
+        &self,
+        ag_client: &AGClientData,
+    ) -> Result<Option<Vec<u8>>, AggregateErrors> {
+        self.recv_packet_internal(ag_client, &mut *ag_client.stream_reader.lock().await)
+            .await
+    }
+
+    /// Tries to receive a packet from the given client, returning `Ok(Some(Vec<u8>))` if
+    /// the packet is complete and ready.
+    ///
+    /// This will **not** lock the calling task if the stream reader is locked, but will return an error.
+    ///
+    /// Returns `Ok(None)` if the packet is being buffered.
+    ///
+    /// Returns `Err(AggregateErrors)` if something went wrong.
+    pub async fn try_recv_packet(
+        &self,
+        ag_client: &AGClientData,
+    ) -> Result<Option<Vec<u8>>, AggregateErrors> {
+        self.recv_packet_internal(
+            ag_client,
+            &mut *ag_client
+                .stream_reader
+                .try_lock()
+                .map_err(|_| AggregateErrors::StreamReaderLocked)?,
+        )
+        .await
+    }
+
     /// Tries to stitch together a buffered packet from the given client,
     /// looked up via `packet_signature`.
     ///
@@ -236,9 +272,38 @@ impl AggregateServer {
 
     /// Sends a packet to the specified client.
     ///
+    /// This **will** lock the calling task until the stream writer is unlocked.
+    ///
     /// If `allow_unauthorized` is `true`, then this will send packets to
     /// unauthorized clients, as well as authorized ones.
     pub async fn send_packet_to(
+        &self,
+        ag_client: Arc<AGClientData>,
+        packet_data: Vec<u8>,
+        allow_unauthorized: bool,
+    ) -> Result<(), AggregateErrors> {
+        if !ag_client.is_authorized(self) && !allow_unauthorized {
+            return Err(AggregateErrors::ClientUnauthorized);
+        }
+
+        NetPacket::new(packet_data, self.magic_header_value)
+            .wrap_and_send(
+                &self.crypt,
+                &mut *ag_client
+                    .stream_writer
+                    .try_lock()
+                    .map_err(|_| AggregateErrors::StreamWriterLocked)?,
+            )
+            .await
+    }
+
+    /// Sends a packet to the specified client.
+    ///
+    /// This will **not** lock the calling task if the stream writer is locked, but will return an error.
+    ///
+    /// If `allow_unauthorized` is `true`, then this will send packets to
+    /// unauthorized clients, as well as authorized ones.
+    pub async fn try_send_packet_to(
         &self,
         ag_client: Arc<AGClientData>,
         packet_data: Vec<u8>,
@@ -264,11 +329,43 @@ impl AggregateServer {
     /// If `allow_unauthorized` is `true`, then this will send packets to
     /// unauthorized clients, as well as authorized ones.
     ///
+    /// This **will** lock the calling task until the clients stream writer is unlocked.
+    ///
     /// **Note**: Unlike `AggregateServer::send_packet_to`, this doesn't return
     /// any errors.
     ///
     /// Any errors encountered whilst sending will be ignored.
     pub async fn send_packet_to_all(&'static self, packet_data: Vec<u8>, allow_unauthorized: bool) {
+        let packet = NetPacket::new(packet_data, self.magic_header_value);
+
+        for kv in &self.authorized_clients {
+            let (_socket_addr, ag_client) = kv.pair();
+            if !ag_client.is_authorized(self) && !allow_unauthorized {
+                continue;
+            }
+
+            let _ = packet
+                .wrap_and_send(&self.crypt, &mut *ag_client.stream_writer.lock().await)
+                .await;
+        }
+    }
+
+    /// Sends a packet to all connected clients.
+    ///
+    /// If `allow_unauthorized` is `true`, then this will send packets to
+    /// unauthorized clients, as well as authorized ones.
+    ///
+    /// This will **not** lock the calling task if the clients stream writer is locked, but will drop the packet.
+    ///
+    /// **Note**: Unlike `AggregateServer::send_packet_to`, this doesn't return
+    /// any errors.
+    ///
+    /// Any errors encountered whilst sending will be ignored.
+    pub async fn try_send_packet_to_all(
+        &'static self,
+        packet_data: Vec<u8>,
+        allow_unauthorized: bool,
+    ) {
         let packet = NetPacket::new(packet_data, self.magic_header_value);
 
         for kv in &self.authorized_clients {

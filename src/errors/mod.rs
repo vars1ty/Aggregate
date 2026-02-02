@@ -13,6 +13,7 @@ pub enum AggregateErrors {
     ClientDisconnected,
     ClientUnauthorized,
 
+    HeaderBuffersLocked,
     StreamReaderLocked,
     StreamWriterLocked,
 
@@ -53,6 +54,10 @@ impl Display for AggregateErrors {
                 write!(f, "Client has been disconnected from the server!")
             }
             Self::ClientUnauthorized => write!(f, "Client hasn't been authorized!"),
+            Self::HeaderBuffersLocked => write!(
+                f,
+                "Header buffers is locked, cannot perform this operation right now!"
+            ),
             Self::StreamReaderLocked => write!(
                 f,
                 "Stream reader is locked, cannot perform this operation right now!"

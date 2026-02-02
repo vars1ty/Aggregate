@@ -142,7 +142,18 @@ impl AggregateClient {
     }
 
     /// Sends a packet to the server.
+    ///
+    /// This **will** lock the calling task until the stream writer is unlocked.
     pub async fn send_to_server(&self, packet_data: Vec<u8>) -> Result<(), AggregateErrors> {
+        NetPacket::new(packet_data, self.magic_header_value)
+            .wrap_and_send(&self.crypt, &mut *self.stream_writer.lock().await)
+            .await
+    }
+
+    /// Sends a packet to the server.
+    ///
+    /// This will **not** lock the calling task, but will error if the stream writer is locked.
+    pub async fn try_send_to_server(&self, packet_data: Vec<u8>) -> Result<(), AggregateErrors> {
         NetPacket::new(packet_data, self.magic_header_value)
             .wrap_and_send(
                 &self.crypt,
@@ -157,17 +168,11 @@ impl AggregateClient {
     /// Tries to receive a packet from the server, returning
     /// the unwrapped bytes of it for you to process, like
     /// deserializing and such.
-    pub async fn recv_packet(&self) -> Result<Vec<u8>, AggregateErrors> {
-        let stream_reader = &mut *self
-            .stream_reader
-            .try_lock()
-            .map_err(|_| AggregateErrors::StreamReaderLocked)?;
-
-        let header_buffers = &mut *self
-            .header_buffers
-            .try_lock()
-            .map_err(|_| AggregateErrors::StreamWriterLocked)?;
-
+    async fn recv_packet_internal(
+        &self,
+        stream_reader: &mut OwnedReadHalf,
+        header_buffers: &mut HeaderBuffers,
+    ) -> Result<Vec<u8>, AggregateErrors> {
         loop {
             match NetPacket::try_read_from_stream(
                 self.magic_header_value,
@@ -209,6 +214,39 @@ impl AggregateClient {
                 NetPacketAction::Disconnected => return Err(AggregateErrors::ClientDisconnected),
             }
         }
+    }
+
+    /// Tries to receive a packet from the server, returning
+    /// the unwrapped bytes of it for you to process, like
+    /// deserializing and such.
+    ///
+    /// This **will** lock the calling task until the stream writer and header buffers are both unlocked.
+    pub async fn recv_packet(&self) -> Result<Vec<u8>, AggregateErrors> {
+        self.recv_packet_internal(
+            &mut *self.stream_reader.lock().await,
+            &mut *self.header_buffers.lock().await,
+        )
+        .await
+    }
+
+    /// Tries to receive a packet from the server, returning
+    /// the unwrapped bytes of it for you to process, like
+    /// deserializing and such.
+    ///
+    /// This will **not** lock the calling task, but will error if the stream writer or header buffers is locked.
+    pub async fn try_recv_packet(&self) -> Result<Vec<u8>, AggregateErrors> {
+        let stream_reader = &mut *self
+            .stream_reader
+            .try_lock()
+            .map_err(|_| AggregateErrors::StreamReaderLocked)?;
+
+        let header_buffers = &mut *self
+            .header_buffers
+            .try_lock()
+            .map_err(|_| AggregateErrors::HeaderBuffersLocked)?;
+
+        self.recv_packet_internal(stream_reader, header_buffers)
+            .await
     }
 
     /// Tries to stitch together a buffered packet from the given client,
