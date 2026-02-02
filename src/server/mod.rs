@@ -287,13 +287,7 @@ impl AggregateServer {
         }
 
         NetPacket::new(packet_data, self.magic_header_value)
-            .wrap_and_send(
-                &self.crypt,
-                &mut *ag_client
-                    .stream_writer
-                    .try_lock()
-                    .map_err(|_| AggregateErrors::StreamWriterLocked)?,
-            )
+            .wrap_and_send(&self.crypt, &mut *ag_client.stream_writer.lock().await)
             .await
     }
 
